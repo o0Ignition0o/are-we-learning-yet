@@ -1,27 +1,69 @@
-use crate::github::RepoData;
+use std::fmt::Display;
+
+use anyhow::Result as AnyResult;
 use chrono::{DateTime, Utc};
 use crates_io_api::Crate;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::{crates::CratesIo, github::RepoData};
+
 #[derive(Serialize, Deserialize, Copy, Clone, Debug)]
 #[serde(rename_all = "kebab-case")]
 pub enum Topic {
-    ScientificComputing,
-    GpuComputing,
-    NeuralNetworks,
-    Metaheuristics,
-    DataPreprocessing,
-    DataStructures,
-    Clustering,
-    DecisionTrees,
-    LinearClassifiers,
-    Reinforcement,
-    Nlp,
+    Communication,
+    Drones,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct InputCrateInfo {
+#[serde(tag = "kind")]
+pub enum InputCrateInfo {
+    CratesIo(CratesIoInputCrateInfo),
+    Manual(ManualCrateInfo),
+}
+
+impl Display for InputCrateInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (name, from) = match &self {
+            Self::CratesIo(c) => {
+                if let Some(name) = &c.name {
+                    (name.clone(), "crates.io")
+                } else if let Some(repo) = &c.repository {
+                    (repo.to_string(), "source code repository")
+                } else {
+                    (format!("Invalid entry: {:#?}", c), "")
+                }
+            }
+            Self::Manual(m) => {
+                let name = if let Some(k) = &m.krate {
+                    k.name.clone()
+                } else {
+                    if let Some(repo) = &m.repo {
+                        repo.name.clone()
+                    } else {
+                        "unknown crate name".to_string()
+                    }
+                };
+
+                (name, "populated manually")
+            }
+        };
+
+        write!(f, "{} from {}", name, from)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ManualCrateInfo {
+    pub topics: Vec<Topic>,
+    pub score: Option<u64>,
+    #[serde(rename = "crate")]
+    pub krate: Option<Crate>,
+    pub repo: Option<RepoData>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CratesIoInputCrateInfo {
     pub name: Option<String>,
     pub topics: Vec<Topic>,
 
@@ -44,37 +86,57 @@ pub struct GeneratedCrateInfo {
     pub repo: Option<RepoData>,
 }
 
-impl From<&InputCrateInfo> for GeneratedCrateInfo {
-    fn from(input: &InputCrateInfo) -> Self {
-        GeneratedCrateInfo {
-            topics: input.topics.clone(),
+impl GeneratedCrateInfo {
+    pub async fn try_from(input: InputCrateInfo) -> AnyResult<Self> {
+        match input {
+            InputCrateInfo::CratesIo(input) => GeneratedCrateInfo::from_crates_io(input).await,
+            InputCrateInfo::Manual(input) => Ok(GeneratedCrateInfo::fill_manually(input)),
+        }
+    }
+
+    fn fill_manually(krate: ManualCrateInfo) -> Self {
+        Self {
+            topics: krate.topics,
+            score: None,
+            repo: krate.repo,
+            krate: krate.krate,
+        }
+    }
+
+    async fn from_crates_io(krate: CratesIoInputCrateInfo) -> AnyResult<Self> {
+        let mut this = Self {
+            topics: krate.topics,
             score: None,
             krate: None,
             repo: None,
+        };
+
+        if let Some(crate_name) = krate.name {
+            let crates_io = CratesIo::new()?;
+
+            match crates_io.get_crate_data(crate_name.as_str()).await {
+                Ok(mut data) => {
+                    data.license = data.license.or(krate.license);
+                    data.documentation = data.documentation.or(krate.documentation);
+
+                    if data.documentation.is_none() {
+                        data.documentation = Some(format!("https://docs.rs/crate/{}", data.name));
+                    }
+                    data.repository = data
+                        .repository
+                        .or(krate.repository.map(|repo| repo.to_string()));
+                    data.description = data.description.or(krate.description);
+
+                    this.krate = Some(data);
+                }
+                Err(err) => {
+                    eprintln!("Error getting crate data for {} - {}", crate_name, err);
+                }
+            }
         }
-    }
-}
 
-// New value takes precedent if it exists
-fn replace_opt<T: Clone>(original: &mut Option<T>, extra: &Option<T>) {
-    if let Some(val) = extra {
-        let _ = original.replace(val.clone());
+        Ok(this)
     }
-}
-
-// Helper to allow specific fields from crates.yml
-// to override the values returned by the Crates.io API
-pub fn override_crate_data(krate: &mut Crate, input: &InputCrateInfo) {
-    replace_opt(&mut krate.license, &input.license);
-    replace_opt(&mut krate.documentation, &input.documentation);
-    if krate.documentation.is_none() {
-        krate.documentation = Some(format!("https://docs.rs/crate/{}", krate.name));
-    }
-    replace_opt(
-        &mut krate.repository,
-        &input.repository.as_ref().map(|r| r.to_string()),
-    );
-    replace_opt(&mut krate.description, &input.description);
 }
 
 impl GeneratedCrateInfo {

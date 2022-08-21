@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{from_value, Value};
 use std::env;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoData {
     pub name: String,
     pub stargazers_count: u32,
     pub last_commit: DateTime<Utc>,
-    // pub contributor_count: Option<u32>,
-    // pub open_issues_count: Option<u32>,
+    pub contributor_count: Option<u32>,
+    pub open_issues_count: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -35,7 +35,8 @@ impl RepoData {
             name: name.to_string(),
             stargazers_count: from_value(repo["stargazers"]["totalCount"].clone())?,
             last_commit: from_value(repo["pushedAt"].clone())?,
-            // contributor_count: from_value(repo["collaborators"]["totalCount"].clone())?,
+            contributor_count: from_value(repo["collaborators"]["totalCount"].clone())?,
+            open_issues_count: from_value(repo["issues"]["totalCount"].clone())?,
         };
         Ok(repo_data)
     }
@@ -61,14 +62,19 @@ impl Github {
                 stargazers {{
                   totalCount
                 }}
+                collaborators {{
+                    totalCount
+                }}
+                issues(states: OPEN) {{
+                    totalCount
+                }}
                 pushedAt
               }}
             }}"#,
             username, repo
         );
-        let response: GraphqlResponse = self.client.graphql(&query).await?;
 
-        // println!("RAW: {:?}", response);
+        let response: GraphqlResponse = self.client.graphql(&query).await?;
 
         // Hopefully temporary: see https://github.com/XAMPPRocky/octocrab/issues/78
         match response {
