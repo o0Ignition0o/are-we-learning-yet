@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
         read_yaml(&path).with_context(|| format!("Error reading {}", path))?;
     let mut generated = Vec::new();
     for krate in input {
-        println!("Processing {}", krate);
+        eprintln!("Processing {}", krate);
 
         let mut gen = GeneratedCrateInfo::try_from(krate).await?;
         // println!("{}", serde_yaml::to_string(&gen).unwrap());
