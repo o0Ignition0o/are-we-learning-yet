@@ -8,18 +8,12 @@ use url::Url;
 
 use crate::{crates::CratesIo, github::RepoData};
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug)]
-#[serde(rename_all = "kebab-case")]
-pub enum Topic {
-    Communication,
-    Drones,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "kind")]
 pub enum InputCrateInfo {
     CratesIo(CratesIoInputCrateInfo),
     Manual(ManualCrateInfo),
+    Category(CategoryInfo),
 }
 
 impl Display for InputCrateInfo {
@@ -47,6 +41,7 @@ impl Display for InputCrateInfo {
 
                 (name, "populated manually")
             }
+            Self::Category(info) => (info.name.clone(), "category"),
         };
 
         write!(f, "{} from {}", name, from)
@@ -54,8 +49,13 @@ impl Display for InputCrateInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CategoryInfo {
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ManualCrateInfo {
-    pub topics: Vec<Topic>,
+    pub topics: Vec<String>,
     pub score: Option<u64>,
     #[serde(rename = "crate")]
     pub krate: Option<Crate>,
@@ -65,7 +65,7 @@ pub struct ManualCrateInfo {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CratesIoInputCrateInfo {
     pub name: Option<String>,
-    pub topics: Vec<Topic>,
+    pub topics: Vec<String>,
 
     //overridable crate fields
     pub documentation: Option<String>,
@@ -76,7 +76,7 @@ pub struct CratesIoInputCrateInfo {
 
 #[derive(Serialize, Clone, Debug)]
 pub struct GeneratedCrateInfo {
-    pub topics: Vec<Topic>,
+    pub topics: Vec<String>,
     pub score: Option<u64>,
 
     #[serde(rename = "meta", skip_serializing_if = "Option::is_none")]
@@ -91,6 +91,9 @@ impl GeneratedCrateInfo {
         match input {
             InputCrateInfo::CratesIo(input) => GeneratedCrateInfo::from_crates_io(input).await,
             InputCrateInfo::Manual(input) => Ok(GeneratedCrateInfo::fill_manually(input)),
+            InputCrateInfo::Category(_) => Err(anyhow::anyhow!(
+                "Categories need to be dealt with somewhere else"
+            )),
         }
     }
 
