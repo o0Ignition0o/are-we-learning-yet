@@ -58,5 +58,6 @@ async fn main() -> Result<()> {
         generated.push(gen);
     }
 
+    println!("{}", serde_json::to_string(&generated).unwrap());
     write_yaml("_data/crates_generated.yaml", generated)
 }
